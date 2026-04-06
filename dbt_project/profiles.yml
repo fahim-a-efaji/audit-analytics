@@ -1,0 +1,10 @@
+# Save this file as ~/.dbt/profiles.yml
+# OR copy it to your dbt_project folder and run dbt with --profiles-dir .
+
+audit_analytics:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "../audit_analytics.duckdb"
+      threads: 4
