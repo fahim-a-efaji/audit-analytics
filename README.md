@@ -101,7 +101,11 @@ models/
 
 ## Dashboard Screenshots
 
-> Add screenshots here after running the project
+![Screenshot 1](data/Screenshot%201.JPG)
+![Screenshot 2](data/Screenshot%202.JPG)
+![Screenshot 3](data/Screenshot%203.JPG)
+![Screenshot 4](data/Screenshot%204.JPG)
+![Screenshot 5](data/Screenshot%205.JPG)
 
 ---
 
