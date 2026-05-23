@@ -2,6 +2,8 @@
 
 > End-to-end analytics engineering project — Python · DuckDB · dbt Core · Streamlit · OpenAI
 
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Streamlit-FF4B4B?logo=streamlit)](https://share.streamlit.io)
+
 Built to demonstrate a production-grade analytics pipeline using 100% free, local tools. Showcases the same skills used in enterprise audit analytics work: ETL pipelines, data modeling, anomaly detection, dashboarding, and AI-assisted data exploration.
 
 ---
@@ -29,7 +31,7 @@ Streamlit Dashboard + OpenAI GPT Chat
 | Transformation | dbt Core + dbt-duckdb | Staging, intermediate, and mart models |
 | Anomaly detection | Python / SQL (Z-score) | Statistical outlier flagging |
 | Dashboard | Streamlit + Plotly | Interactive KPI dashboard |
-| AI layer | OpenAI GPT-3.5 | Natural language Q&A on data |
+| AI layer | OpenAI GPT-4o-mini | Natural language Q&A on data |
 
 ---
 
@@ -47,26 +49,38 @@ Streamlit Dashboard + OpenAI GPT Chat
 ## Setup & Run
 
 ### 1. Clone and install
+
 ```bash
-git clone https://github.com/YOUR_USERNAME/audit-analytics-dashboard
-cd audit-analytics-dashboard
+git clone https://github.com/YOUR_USERNAME/audit-analytics
+cd audit-analytics
 pip install -r requirements.txt
 ```
 
 ### 2. Add OpenAI API key (optional — dashboard works without it)
+
+**Mac / Linux / Git Bash:**
 ```bash
-# Get free key at https://platform.openai.com/api-keys
-# Edit .streamlit/secrets.toml
-OPENAI_API_KEY = "sk-your-key-here"
+mkdir .streamlit
+echo 'OPENAI_API_KEY = "sk-your-key-here"' > .streamlit/secrets.toml
 ```
 
-### 3. Run everything with one command
+**Windows PowerShell:**
+```powershell
+New-Item -ItemType Directory -Force .streamlit
+'OPENAI_API_KEY = "sk-your-key-here"' | Out-File .streamlit\secrets.toml -Encoding utf8
+```
+
+Get a free key at https://platform.openai.com/api-keys
+
+### 3. Run everything
+
+**Mac / Linux / Git Bash (one command):**
 ```bash
 bash run.sh
 ```
 
-### Or run step by step
-```bash
+**Windows PowerShell (step by step):**
+```powershell
 # Step 1 — generate data
 python data/generate_data.py
 
@@ -106,6 +120,22 @@ models/
 ![Screenshot 3](data/Screenshot%203.JPG)
 ![Screenshot 4](data/Screenshot%204.JPG)
 ![Screenshot 5](data/Screenshot%205.JPG)
+
+---
+
+## Deploying Online (GitHub Pages + Streamlit Cloud)
+
+### Live App — Streamlit Community Cloud (free)
+1. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with GitHub
+2. Click **New app** → select this repo → branch: `main` → main file: `app/dashboard.py`
+3. Under **Advanced settings → Secrets**, add: `OPENAI_API_KEY = "sk-..."`
+4. Click **Deploy** — you'll get a public URL to share
+
+### Project Page — GitHub Pages
+1. Go to your repo on GitHub → **Settings → Pages**
+2. Source: **Deploy from a branch** → branch: `main`, folder: `/ (root)`
+3. Click **Save** — your README becomes a public project page at:
+   `https://YOUR_USERNAME.github.io/audit-analytics/`
 
 ---
 

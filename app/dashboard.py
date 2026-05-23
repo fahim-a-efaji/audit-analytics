@@ -28,6 +28,8 @@ DB_PATH = os.path.normpath(DB_PATH)
 # ── Load data ─────────────────────────────────────────────────────────────────
 @st.cache_data
 def load_data():
+    if not os.path.exists(DB_PATH):
+        return None, None
     con = duckdb.connect(DB_PATH, read_only=True)
     df      = con.execute("SELECT * FROM fct_transactions").df()
     summary = con.execute("SELECT * FROM fct_anomaly_summary").df()
@@ -36,6 +38,14 @@ def load_data():
 
 
 df, summary = load_data()
+
+if df is None:
+    st.error(
+        "Database not found. Run the data pipeline first:\n\n"
+        "```\npython data/generate_data.py\n"
+        "cd dbt_project && dbt run --profiles-dir .\n```"
+    )
+    st.stop()
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.title("🔍 Audit Analytics Dashboard")
@@ -144,6 +154,11 @@ else:
         st.session_state.messages.append({"role": "user", "content": prompt})
         st.chat_message("user").write(prompt)
 
+        top_vendor = (
+            f"{summary.iloc[0]['vendor']} ({int(summary.iloc[0]['anomaly_count'])} anomalies)"
+            if not summary.empty else "N/A"
+        )
+
         context = f"""
 You are a senior audit data analyst. Answer concisely based on this dataset summary:
 
@@ -154,7 +169,7 @@ You are a senior audit data analyst. Answer concisely based on this dataset summ
 - Vendors: {', '.join(df['vendor'].unique())}
 - Categories: {', '.join(df['category'].unique())}
 - Date range: {df['transaction_date'].min()} to {df['transaction_date'].max()}
-- Top anomaly vendor: {summary.iloc[0]['vendor']} ({int(summary.iloc[0]['anomaly_count'])} anomalies)
+- Top anomaly vendor: {top_vendor}
 
 Anomaly summary (top 5 rows):
 {summary.head(5).to_string(index=False)}
@@ -164,14 +179,17 @@ Answer the question clearly. If you cannot answer from this data, say so.
 
         with st.chat_message("assistant"):
             with st.spinner("Analysing..."):
-                response = openai_client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[
-                        {"role": "system", "content": context},
-                        {"role": "user",   "content": prompt},
-                    ],
-                    max_tokens=300,
-                )
-                answer = response.choices[0].message.content
-                st.write(answer)
-                st.session_state.messages.append({"role": "assistant", "content": answer})
+                try:
+                    response = openai_client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {"role": "system", "content": context},
+                            {"role": "user",   "content": prompt},
+                        ],
+                        max_tokens=300,
+                    )
+                    answer = response.choices[0].message.content
+                    st.write(answer)
+                    st.session_state.messages.append({"role": "assistant", "content": answer})
+                except Exception as e:
+                    st.error(f"OpenAI API error: {e}. Check your API key and try again.")

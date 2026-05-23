@@ -21,7 +21,7 @@ SELECT
     CASE
         WHEN is_anomaly AND NOT approved THEN 'HIGH'
         WHEN is_anomaly AND approved     THEN 'MEDIUM'
-        WHEN z_score > 2                 THEN 'LOW'
+        WHEN ABS(z_score) > 2            THEN 'LOW'
         ELSE 'NORMAL'
     END AS risk_level
 FROM {{ ref('int_anomaly_flags') }}
