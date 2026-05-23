@@ -7,6 +7,8 @@ Requires: OPENAI_API_KEY in .streamlit/secrets.toml  OR  set as env var
 """
 
 import os
+import sys
+import subprocess
 import streamlit as st
 import duckdb
 import pandas as pd
@@ -20,16 +22,155 @@ st.set_page_config(
     layout="wide",
 )
 
-# ── DB path ───────────────────────────────────────────────────────────────────
-DB_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "audit_analytics.duckdb"))
+# ── Paths ─────────────────────────────────────────────────────────────────────
+REPO_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
+DB_PATH   = os.path.join(REPO_ROOT, "audit_analytics.duckdb")
 
-if not os.path.exists(DB_PATH):
-    st.error(
-        "Database not found. Run the data pipeline first:\n\n"
-        "```\npython data/generate_data.py\n"
-        "cd dbt_project && dbt run --profiles-dir .\n```"
+
+def _tables_ready():
+    """Return True only if the mart tables already exist in the DB."""
+    if not os.path.exists(DB_PATH):
+        return False
+    con = None
+    try:
+        con = duckdb.connect(DB_PATH, read_only=True)
+        con.execute("SELECT 1 FROM fct_transactions LIMIT 1")
+        con.execute("SELECT 1 FROM fct_anomaly_summary LIMIT 1")
+        return True
+    except Exception:
+        return False
+    finally:
+        if con:
+            con.close()
+
+
+def _run_sql_pipeline():
+    """Replicate the four dbt models directly in DuckDB — no dbt binary needed."""
+    con = duckdb.connect(DB_PATH)
+    try:
+        con.execute("""
+            CREATE OR REPLACE VIEW stg_transactions AS
+            SELECT
+                transaction_id,
+                CAST(date AS DATE)               AS transaction_date,
+                UPPER(TRIM(vendor))              AS vendor,
+                UPPER(TRIM(category))            AS category,
+                ROUND(CAST(amount AS DOUBLE), 2) AS amount,
+                TRIM(submitted_by)               AS submitted_by,
+                UPPER(TRIM(department))          AS department,
+                CAST(approved AS BOOLEAN)        AS approved,
+                currency
+            FROM raw_transactions
+            WHERE transaction_id IS NOT NULL AND amount > 0
+        """)
+
+        con.execute("""
+            CREATE OR REPLACE VIEW int_anomaly_flags AS
+            WITH category_stats AS (
+                SELECT
+                    category,
+                    AVG(amount)    AS avg_amount,
+                    STDDEV(amount) AS std_amount,
+                    MEDIAN(amount) AS median_amount
+                FROM stg_transactions
+                GROUP BY category
+            ),
+            flagged AS (
+                SELECT
+                    t.*,
+                    s.avg_amount,
+                    s.std_amount,
+                    s.median_amount,
+                    CASE
+                        WHEN s.std_amount > 0
+                        THEN ROUND((t.amount - s.avg_amount) / s.std_amount, 2)
+                        ELSE 0
+                    END AS z_score,
+                    CASE
+                        WHEN s.std_amount > 0
+                         AND ABS(t.amount - s.avg_amount) > 3 * s.std_amount
+                        THEN TRUE ELSE FALSE
+                    END AS is_anomaly
+                FROM stg_transactions t
+                LEFT JOIN category_stats s USING (category)
+            )
+            SELECT * FROM flagged
+        """)
+
+        con.execute("""
+            CREATE OR REPLACE TABLE fct_transactions AS
+            SELECT
+                transaction_id,
+                transaction_date,
+                EXTRACT(YEAR  FROM transaction_date) AS year,
+                EXTRACT(MONTH FROM transaction_date) AS month,
+                vendor,
+                category,
+                department,
+                amount,
+                currency,
+                submitted_by,
+                approved,
+                is_anomaly,
+                z_score,
+                avg_amount,
+                std_amount,
+                median_amount,
+                CASE
+                    WHEN is_anomaly AND NOT approved THEN 'HIGH'
+                    WHEN is_anomaly AND approved     THEN 'MEDIUM'
+                    WHEN ABS(z_score) > 2            THEN 'LOW'
+                    ELSE 'NORMAL'
+                END AS risk_level
+            FROM int_anomaly_flags
+        """)
+
+        con.execute("""
+            CREATE OR REPLACE TABLE fct_anomaly_summary AS
+            SELECT
+                vendor,
+                category,
+                COUNT(*)                                                AS total_transactions,
+                SUM(CASE WHEN is_anomaly THEN 1 ELSE 0 END)            AS anomaly_count,
+                ROUND(
+                    100.0 * SUM(CASE WHEN is_anomaly THEN 1 ELSE 0 END)
+                    / COUNT(*), 1
+                )                                                       AS anomaly_pct,
+                ROUND(SUM(amount), 2)                                   AS total_amount,
+                ROUND(AVG(amount), 2)                                   AS avg_amount,
+                ROUND(MAX(amount), 2)                                   AS max_amount,
+                SUM(CASE WHEN risk_level = 'HIGH'   THEN 1 ELSE 0 END) AS high_risk_count,
+                SUM(CASE WHEN risk_level = 'MEDIUM' THEN 1 ELSE 0 END) AS medium_risk_count
+            FROM fct_transactions
+            GROUP BY vendor, category
+            ORDER BY anomaly_count DESC
+        """)
+    finally:
+        con.close()
+
+
+def build_pipeline():
+    # Step 1 — generate raw data into DuckDB
+    result = subprocess.run(
+        [sys.executable, os.path.join(REPO_ROOT, "data", "generate_data.py")],
+        capture_output=True, text=True, cwd=REPO_ROOT,
     )
-    st.stop()
+    if result.returncode != 0:
+        st.error(f"Data generation failed:\n```\n{result.stderr}\n```")
+        st.stop()
+
+    # Step 2 — run SQL transforms directly (no dbt needed)
+    try:
+        _run_sql_pipeline()
+    except Exception as e:
+        st.error(f"SQL pipeline failed: {e}")
+        st.stop()
+
+
+if not _tables_ready():
+    with st.spinner("Building data pipeline (first run only, ~15 s)..."):
+        build_pipeline()
+    st.cache_data.clear()
 
 
 # ── Load data ─────────────────────────────────────────────────────────────────
@@ -126,7 +267,6 @@ st.divider()
 st.subheader("🤖 AI Audit Assistant")
 st.caption("Ask questions about the data in plain English — powered by OpenAI GPT")
 
-# Get API key from Streamlit secrets or env var
 api_key = None
 try:
     api_key = st.secrets["OPENAI_API_KEY"]
