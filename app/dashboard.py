@@ -7,6 +7,8 @@ Requires: OPENAI_API_KEY in .streamlit/secrets.toml  OR  set as env var
 """
 
 import os
+import sys
+import subprocess
 import streamlit as st
 import duckdb
 import pandas as pd
@@ -20,16 +22,34 @@ st.set_page_config(
     layout="wide",
 )
 
-# ── DB path ───────────────────────────────────────────────────────────────────
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "audit_analytics.duckdb")
-DB_PATH = os.path.normpath(DB_PATH)
+# ── Paths ─────────────────────────────────────────────────────────────────────
+REPO_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
+DB_PATH   = os.path.join(REPO_ROOT, "audit_analytics.duckdb")
+DBT_DIR   = os.path.join(REPO_ROOT, "dbt_project")
+
+
+# ── Auto-build pipeline if DB is missing (runs once on Streamlit Cloud) ───────
+def build_pipeline():
+    steps = [
+        ([sys.executable, os.path.join(REPO_ROOT, "data", "generate_data.py")], REPO_ROOT),
+        (["dbt", "run", "--profiles-dir", "."], DBT_DIR),
+    ]
+    for cmd, cwd in steps:
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
+        if result.returncode != 0:
+            st.error(f"Pipeline step failed: `{' '.join(cmd)}`\n\n```\n{result.stderr}\n```")
+            st.stop()
+
+
+if not os.path.exists(DB_PATH):
+    with st.spinner("First run — building data pipeline (takes ~30 seconds)..."):
+        build_pipeline()
+    st.cache_data.clear()
 
 
 # ── Load data ─────────────────────────────────────────────────────────────────
 @st.cache_data
 def load_data():
-    if not os.path.exists(DB_PATH):
-        return None, None
     con = duckdb.connect(DB_PATH, read_only=True)
     df      = con.execute("SELECT * FROM fct_transactions").df()
     summary = con.execute("SELECT * FROM fct_anomaly_summary").df()
@@ -38,14 +58,6 @@ def load_data():
 
 
 df, summary = load_data()
-
-if df is None:
-    st.error(
-        "Database not found. Run the data pipeline first:\n\n"
-        "```\npython data/generate_data.py\n"
-        "cd dbt_project && dbt run --profiles-dir .\n```"
-    )
-    st.stop()
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.title("🔍 Audit Analytics Dashboard")
