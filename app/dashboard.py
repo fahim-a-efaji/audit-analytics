@@ -7,9 +7,6 @@ Requires: OPENAI_API_KEY in .streamlit/secrets.toml  OR  set as env var
 """
 
 import os
-import sys
-import shutil
-import subprocess
 import streamlit as st
 import duckdb
 import pandas as pd
@@ -23,56 +20,16 @@ st.set_page_config(
     layout="wide",
 )
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
-REPO_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
-DB_PATH   = os.path.join(REPO_ROOT, "audit_analytics.duckdb")
-DBT_DIR   = os.path.join(REPO_ROOT, "dbt_project")
+# ── DB path ───────────────────────────────────────────────────────────────────
+DB_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "audit_analytics.duckdb"))
 
-
-def _tables_ready():
-    """Check that dbt mart tables exist inside the DB."""
-    if not os.path.exists(DB_PATH):
-        return False
-    con = None
-    try:
-        con = duckdb.connect(DB_PATH, read_only=True)
-        con.execute("SELECT 1 FROM fct_transactions LIMIT 1")
-        con.execute("SELECT 1 FROM fct_anomaly_summary LIMIT 1")
-        return True
-    except Exception:
-        return False
-    finally:
-        if con:
-            con.close()
-
-
-# ── Auto-build pipeline when tables are missing (first run on Streamlit Cloud)
-def build_pipeline():
-    # Step 1 — generate raw data into DuckDB
-    result = subprocess.run(
-        [sys.executable, os.path.join(REPO_ROOT, "data", "generate_data.py")],
-        capture_output=True, text=True, cwd=REPO_ROOT,
+if not os.path.exists(DB_PATH):
+    st.error(
+        "Database not found. Run the data pipeline first:\n\n"
+        "```\npython data/generate_data.py\n"
+        "cd dbt_project && dbt run --profiles-dir .\n```"
     )
-    if result.returncode != 0:
-        st.error(f"Data generation failed:\n```\n{result.stderr}\n```")
-        st.stop()
-
-    # Step 2 — run dbt; find executable next to the current Python binary
-    # (covers Streamlit Cloud where the venv bin dir may not be on $PATH)
-    dbt_exe = shutil.which("dbt") or os.path.join(os.path.dirname(sys.executable), "dbt")
-    result = subprocess.run(
-        [dbt_exe, "run", "--profiles-dir", ".", "--project-dir", DBT_DIR],
-        capture_output=True, text=True, cwd=DBT_DIR,
-    )
-    if result.returncode != 0:
-        st.error(f"dbt run failed:\n```\n{result.stderr}\n```")
-        st.stop()
-
-
-if not _tables_ready():
-    with st.spinner("First run — building data pipeline (takes ~30 s)..."):
-        build_pipeline()
-    st.cache_data.clear()
+    st.stop()
 
 
 # ── Load data ─────────────────────────────────────────────────────────────────
