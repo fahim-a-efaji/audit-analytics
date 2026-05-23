@@ -32,14 +32,17 @@ def _tables_ready():
     """Check that dbt mart tables exist inside the DB."""
     if not os.path.exists(DB_PATH):
         return False
+    con = None
     try:
         con = duckdb.connect(DB_PATH, read_only=True)
         con.execute("SELECT 1 FROM fct_transactions LIMIT 1")
         con.execute("SELECT 1 FROM fct_anomaly_summary LIMIT 1")
-        con.close()
         return True
     except Exception:
         return False
+    finally:
+        if con:
+            con.close()
 
 
 # ── Auto-build pipeline when tables are missing (first run on Streamlit Cloud)
