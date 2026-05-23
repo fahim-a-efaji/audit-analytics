@@ -2,7 +2,7 @@
 
 > End-to-end analytics engineering project — Python · DuckDB · dbt Core · Streamlit · OpenAI
 
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-Streamlit-FF4B4B?logo=streamlit)](https://share.streamlit.io)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Streamlit-FF4B4B?logo=streamlit)](https://fahim-audit-analytics.streamlit.app/)
 
 Built to demonstrate a production-grade analytics pipeline using 100% free, local tools. Showcases the same skills used in enterprise audit analytics work: ETL pipelines, data modeling, anomaly detection, dashboarding, and AI-assisted data exploration.
 
