@@ -8,6 +8,7 @@ Requires: OPENAI_API_KEY in .streamlit/secrets.toml  OR  set as env var
 
 import os
 import sys
+import shutil
 import subprocess
 import streamlit as st
 import duckdb
@@ -56,16 +57,15 @@ def build_pipeline():
         st.error(f"Data generation failed:\n```\n{result.stderr}\n```")
         st.stop()
 
-    # Step 2 — run dbt via its Python API (avoids PATH issues on Streamlit Cloud)
-    try:
-        from dbt.cli.main import dbtRunner
-        runner = dbtRunner()
-        res = runner.invoke(["run", "--profiles-dir", ".", "--project-dir", DBT_DIR])
-        if not res.success:
-            st.error("dbt run failed — check Streamlit Cloud logs for details.")
-            st.stop()
-    except Exception as e:
-        st.error(f"dbt error: {e}")
+    # Step 2 — run dbt; find executable next to the current Python binary
+    # (covers Streamlit Cloud where the venv bin dir may not be on $PATH)
+    dbt_exe = shutil.which("dbt") or os.path.join(os.path.dirname(sys.executable), "dbt")
+    result = subprocess.run(
+        [dbt_exe, "run", "--profiles-dir", ".", "--project-dir", DBT_DIR],
+        capture_output=True, text=True, cwd=DBT_DIR,
+    )
+    if result.returncode != 0:
+        st.error(f"dbt run failed:\n```\n{result.stderr}\n```")
         st.stop()
 
 
@@ -79,9 +79,11 @@ if not _tables_ready():
 @st.cache_data
 def load_data():
     con = duckdb.connect(DB_PATH, read_only=True)
-    df      = con.execute("SELECT * FROM fct_transactions").df()
-    summary = con.execute("SELECT * FROM fct_anomaly_summary").df()
-    con.close()
+    try:
+        df      = con.execute("SELECT * FROM fct_transactions").df()
+        summary = con.execute("SELECT * FROM fct_anomaly_summary").df()
+    finally:
+        con.close()
     return df, summary
 
 
