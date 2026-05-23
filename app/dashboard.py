@@ -28,21 +28,46 @@ DB_PATH   = os.path.join(REPO_ROOT, "audit_analytics.duckdb")
 DBT_DIR   = os.path.join(REPO_ROOT, "dbt_project")
 
 
-# ── Auto-build pipeline if DB is missing (runs once on Streamlit Cloud) ───────
+def _tables_ready():
+    """Check that dbt mart tables exist inside the DB."""
+    if not os.path.exists(DB_PATH):
+        return False
+    try:
+        con = duckdb.connect(DB_PATH, read_only=True)
+        con.execute("SELECT 1 FROM fct_transactions LIMIT 1")
+        con.execute("SELECT 1 FROM fct_anomaly_summary LIMIT 1")
+        con.close()
+        return True
+    except Exception:
+        return False
+
+
+# ── Auto-build pipeline when tables are missing (first run on Streamlit Cloud)
 def build_pipeline():
-    steps = [
-        ([sys.executable, os.path.join(REPO_ROOT, "data", "generate_data.py")], REPO_ROOT),
-        (["dbt", "run", "--profiles-dir", "."], DBT_DIR),
-    ]
-    for cmd, cwd in steps:
-        result = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
-        if result.returncode != 0:
-            st.error(f"Pipeline step failed: `{' '.join(cmd)}`\n\n```\n{result.stderr}\n```")
+    # Step 1 — generate raw data into DuckDB
+    result = subprocess.run(
+        [sys.executable, os.path.join(REPO_ROOT, "data", "generate_data.py")],
+        capture_output=True, text=True, cwd=REPO_ROOT,
+    )
+    if result.returncode != 0:
+        st.error(f"Data generation failed:\n```\n{result.stderr}\n```")
+        st.stop()
+
+    # Step 2 — run dbt via its Python API (avoids PATH issues on Streamlit Cloud)
+    try:
+        from dbt.cli.main import dbtRunner
+        runner = dbtRunner()
+        res = runner.invoke(["run", "--profiles-dir", ".", "--project-dir", DBT_DIR])
+        if not res.success:
+            st.error("dbt run failed — check Streamlit Cloud logs for details.")
             st.stop()
+    except Exception as e:
+        st.error(f"dbt error: {e}")
+        st.stop()
 
 
-if not os.path.exists(DB_PATH):
-    with st.spinner("First run — building data pipeline (takes ~30 seconds)..."):
+if not _tables_ready():
+    with st.spinner("First run — building data pipeline (takes ~30 s)..."):
         build_pipeline()
     st.cache_data.clear()
 
